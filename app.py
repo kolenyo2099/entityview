@@ -86,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/":
             return self.send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
         if self.path == "/explorer":
-            return self.send(200, (HERE / "explorer.html").read_bytes(), "text/html; charset=utf-8")
+            return self.send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         if self.path.startswith("/state"):
             c = load_config()
             qf = qfile(c["questions_name"])

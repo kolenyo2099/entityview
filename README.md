@@ -26,7 +26,7 @@ The first extraction also downloads the GLiNER model (~1.5 GB, once).
 | `mentions` | entity found: `label` (company, person, government agency, money amount…), text, `norm` (grouping key), score, surrounding text |
 | `answers_<set>` | article × question: answer, supporting quote, `evidence_found` (quote really is in the article) |
 
-## Explorer: `explorer.html`
+## Explorer: `index.html`
 
 The team's view of the data. It reads the results sheet live every time it opens (it must stay
 published: File → Share → Publish to web), so it is always current after a push. It shows:
