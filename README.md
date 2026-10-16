@@ -44,7 +44,7 @@ The team's view of the data. It reads the results sheet live every time it opens
 published: File → Share → Publish to web), so it is always current after a push. It shows:
 - how the database grows, per person or project;
 - the most-mentioned entities of the **Focus** type you pick (companies, people, facilities, any type in the data);
-- a network of the top entities and the articles that connect them;
+- a network connecting any combination of up to five types (people and companies, agencies and courts…) through the articles that mention them;
 - a world map of coverage;
 - a searchable table of every entity.
 

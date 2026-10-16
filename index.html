@@ -80,6 +80,16 @@ svg text { fill: var(--muted); font: 11px var(--sans); font-variant-numeric: tab
 .bar .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .tag { font-size: 11px; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 99px; padding: 0 7px; white-space: nowrap; }
 
+.types { border: 0; padding: 0; margin: 12px 0 8px; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.types legend { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 0; margin-bottom: 6px; }
+.tchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--axis); border-radius: 99px; padding: 3px 11px 3px 9px; cursor: pointer; font-size: 13px; user-select: none; }
+.tchip:has(input:checked) { border-color: var(--ink-2); background: var(--hover); }
+.tchip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tchip input { position: absolute; opacity: 0; pointer-events: none; }
+.tchip i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--axis); }
+.tchip span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.netopts { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin-bottom: 8px; font-size: 13px; color: var(--ink-2); }
+.netopts select { padding: 3px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--page); }
 #net svg { width: 100%; height: 560px; display: block; background: var(--page); border-radius: 8px; touch-action: none; }
 #net text { fill: var(--ink-2); pointer-events: none; }
 #map svg { width: 100%; height: auto; display: block; }
@@ -163,12 +173,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 
   <section id="network">
     <div class="row-head">
-      <div><h2>Who appears with whom</h2><p class="lede">The most-mentioned entities (large dots) and the articles that mention two or more of them (small grey dots). Drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
-      <div class="table-tools">
-        <select id="n-type" aria-label="Entities to include">
-          <option value="focus" selected>Focus type only</option><option value="">All entity types</option><option value="nocountry">Everything but countries</option></select>
-        <select id="n-count" aria-label="Number of entities"><option>20</option><option selected>40</option><option>80</option><option>150</option></select>
-      </div>
+      <div><h2>Who appears with whom</h2><p class="lede">Pick up to five types to connect, such as people and companies. Large dots are the most-mentioned entities of each type; small grey dots are the articles that mention two or more of them. Drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
+    </div>
+    <fieldset class="types" id="n-types"><legend>Types to connect</legend></fieldset>
+    <div class="netopts">
+      <label>Top <select id="n-count" aria-label="Entities per type"><option>10</option><option selected>20</option><option>40</option><option>80</option></select> per type</label>
+      <label><input type="checkbox" id="n-cross" checked> Only articles that link different types</label>
+      <span id="n-note" class="facts"></span>
     </div>
     <div class="legend" id="net-legend"></div>
     <div id="net"><div class="loading">Loading entity mentions…</div></div>
@@ -331,6 +342,27 @@ function prepareMentions(rows) {
   const f = $("#f-focus"), saved = (() => { try { return localStorage.getItem("focus"); } catch { return null; } })();
   f.innerHTML = opts;
   f.value = choices.includes(saved) ? saved : choices.find(t => !["country", "city", "person"].includes(t)) || choices[0];
+  // network type chips; colors stick to a type while it stays ticked
+  const nEnts = t => [...entityInfo.values()].filter(e => inType(e.type, t)).length;
+  $("#n-types").innerHTML = `<legend>Types to connect</legend>` + choices.map(t =>
+    `<label class="tchip"><input type="checkbox" value="${esc(t)}"><i></i>${esc(typeLabel(t))}<span>${fmt.format(nEnts(t))}</span></label>`).join("");
+  let pick; try { pick = JSON.parse(localStorage.getItem("netTypes")); } catch {}
+  pick = (Array.isArray(pick) ? pick : [f.value, "person"]).filter(t => choices.includes(t)).slice(0, 5);
+  netColors = new Map();
+  for (const t of new Set(pick)) tickType(t, true);
+}
+let netColors = new Map();
+function tickType(t, on) {
+  const box = [...document.querySelectorAll("#n-types input")].find(i => i.value === t);
+  if (on) {
+    const free = [1, 2, 3, 4, 5].find(n => ![...netColors.values()].includes(n));
+    if (!free) { box.checked = false; $("#n-note").textContent = "Five types at most: untick one first."; return false; }
+    netColors.set(t, free);
+  } else netColors.delete(t);
+  box.checked = on;
+  box.nextElementSibling.style.background = on ? `var(--s${netColors.get(t)})` : "";
+  $("#n-note").textContent = "";
+  try { localStorage.setItem("netTypes", JSON.stringify([...netColors.keys()])); } catch {}
 }
 
 function setupFilters() {
@@ -433,26 +465,33 @@ function renderFocus() {
 
 let sim;
 function renderNetwork() {
-  const t = $("#n-type").value, N = +$("#n-count").value;
-  const ents = view.ents.filter(e => t === "focus" ? inType(e.type, $("#f-focus").value) : t === "nocountry" ? e.type !== "country" : true)
-    .sort((a, b) => b.arts.size - a.arts.size).slice(0, N);
-  // Four most common types on screen get colors; the rest share "Other".
-  const topTypes = [...d3.rollup(ents, v => v.length, e => e.type)].sort((a, b) => b[1] - a[1]).slice(0, 4).map(d => d[0]);
-  const NET_GROUPS = topTypes.map((ty, i) => [cap(ty), x => x === ty, `var(--s${i + 1})`]).concat([["Other", () => true, "var(--s5)"]]);
-  const group = e => NET_GROUPS.find(([, f]) => f(e.type));
+  const sel = [...netColors.keys()], N = +$("#n-count").value;
+  const box = $("#net");
+  if (!sel.length) { if (sim) sim.stop(); $("#net-legend").innerHTML = ""; box.innerHTML = `<p class="loading">Tick at least one type above.</p>`; return; }
+  const groupOf = e => sel.find(s => inType(e.type, s));
+  // each ticked type gets its own top N, so a big type can't crowd out the others
+  let ents = sel.flatMap(s => view.ents.filter(e => inType(e.type, s)).sort((a, b) => b.arts.size - a.arts.size).slice(0, N));
+  const byKey = new Map(ents.map(e => [e.key, e]));
+  const cross = $("#n-cross").checked && sel.length > 1;
   const artLinks = new Map();
   for (const e of ents) for (const aid of e.arts) (artLinks.get(aid) || artLinks.set(aid, []).get(aid)).push(e.key);
-  // ponytail: articles linking 2+ shown entities only, capped at 600; past that the layout is a hairball anyway.
-  const arts = [...artLinks].filter(([, ks]) => ks.length > 1).sort((a, b) => b[1].length - a[1].length).slice(0, 600);
+  // ponytail: capped at 600 articles; past that the layout is a hairball anyway.
+  const arts = [...artLinks].filter(([, ks]) => ks.length > 1 && (!cross || new Set(ks.map(k => groupOf(byKey.get(k)))).size > 1))
+    .sort((a, b) => b[1].length - a[1].length).slice(0, 600);
+  const linked = new Set(arts.flatMap(([, ks]) => ks)), hidden = ents.length - linked.size;
+  ents = ents.filter(e => linked.has(e.key));
+  $("#n-note").textContent = hidden > 0 ? `${fmt.format(hidden)} of the top entities share no article ${cross ? "with another type" : "with the others"} and are left out.` : "";
+  const NET_GROUPS = sel.map(s => [typeLabel(s), x => inType(x, s), `var(--s${netColors.get(s)})`]);
+  const group = e => NET_GROUPS.find(([, f]) => f(e.type));
   const maxA = d3.max(ents, e => e.arts.size) || 1, r = d3.scaleSqrt().domain([1, maxA]).range([4, 22]);
   const nodes = ents.map(e => ({ id: e.key, e, r: r(e.arts.size), color: group(e)[2] }))
     .concat(arts.map(([aid]) => ({ id: "A:" + aid, a: byArticle.get(aid), r: 2.5 })));
   const links = arts.flatMap(([aid, ks]) => ks.map(k => ({ source: "A:" + aid, target: k })));
   $("#net-legend").innerHTML = NET_GROUPS.filter(g => ents.some(e => group(e) === g)).map(([n, , c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("") +
     `<span><i style="background:var(--muted);border-radius:50%"></i>Article (${fmt.format(arts.length)})</span>`;
-  const box = $("#net"), W = box.clientWidth || 800, H = 560;
+  const W = box.clientWidth || 800, H = 560;
   if (sim) sim.stop();
-  if (!ents.length) { box.innerHTML = `<p class="loading">No entities for these filters.</p>`; return; }
+  if (!ents.length) { box.innerHTML = `<p class="loading">No articles connect ${cross ? "these types" : "these entities"} under the current filters.</p>`; return; }
   const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("role", "img").attr("aria-label", `Network of ${ents.length} entities and ${arts.length} articles`);
   const g = svg.append("g");
   svg.call(d3.zoom().scaleExtent([.3, 6]).on("zoom", ev => g.attr("transform", ev.transform)));
@@ -467,7 +506,7 @@ function renderNetwork() {
     .call(d3.drag().on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(.2).restart(); d.fx = d.x; d.fy = d.y; })
       .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; }).on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = d.fy = null; }));
   // label the biggest entities only
-  const labelled = new Set(ents.slice(0, Math.min(25, N)).map(e => e.key));
+  const labelled = new Set(sel.flatMap(s => ents.filter(e => groupOf(e) === s).slice(0, Math.ceil(25 / sel.length))).map(e => e.key));
   const label = g.append("g").selectAll("text").data(nodes.filter(d => labelled.has(d.id))).join("text")
     .text(d => d.e.name.length > 24 ? d.e.name.slice(0, 23) + "…" : d.e.name).attr("font-size", 11).attr("dy", d => -d.r - 3).attr("text-anchor", "middle");
   sim = d3.forceSimulation(nodes)
@@ -482,7 +521,8 @@ function renderNetwork() {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) { sim.stop(); sim.tick(300); sim.on("tick")(); }
   box.replaceChildren(svg.node());
 }
-$("#n-type").addEventListener("change", () => view && renderNetwork());
+$("#n-types").addEventListener("change", ev => { if (tickType(ev.target.value, ev.target.checked) !== false && view) renderNetwork(); });
+$("#n-cross").addEventListener("change", () => view && renderNetwork());
 $("#f-focus").addEventListener("change", () => { try { localStorage.setItem("focus", $("#f-focus").value); } catch {} if (view) { renderFocus(); renderNetwork(); } });
 $("#n-count").addEventListener("change", () => view && renderNetwork());
 
