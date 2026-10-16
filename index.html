@@ -90,7 +90,7 @@ svg text { fill: var(--muted); font: 11px var(--sans); font-variant-numeric: tab
 .tchip span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .netopts { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin-bottom: 8px; font-size: 13px; color: var(--ink-2); }
 .netopts select { padding: 3px 6px; border: 1px solid var(--axis); border-radius: 6px; background: var(--page); }
-#net svg { width: 100%; height: 560px; display: block; background: var(--page); border-radius: 8px; touch-action: none; }
+#net svg { width: 100%; height: auto; display: block; background: var(--page); border-radius: 8px; touch-action: none; }
 #net text { fill: var(--ink-2); pointer-events: none; }
 #map svg { width: 100%; height: auto; display: block; }
 #map path.c { stroke: var(--surface); stroke-width: .5; cursor: pointer; }
@@ -153,6 +153,20 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <span class="summary" id="summary"></span>
   </div>
 
+  <section id="network">
+    <div class="row-head">
+      <div><h2 style="font-size:18px">Who appears with whom</h2><p class="lede">Pick up to five types to connect, such as people and companies. Large dots are the most-mentioned entities of each type; small grey dots are the articles that mention two or more of them. Hover a dot to light up what it connects to; drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
+    </div>
+    <fieldset class="types" id="n-types"><legend>Types to connect</legend></fieldset>
+    <div class="netopts">
+      <label>Top <select id="n-count" aria-label="Entities per type"><option>10</option><option selected>20</option><option>40</option><option>80</option></select> per type</label>
+      <label><input type="checkbox" id="n-cross" checked> Only articles that link different types</label>
+      <span id="n-note" class="facts"></span>
+    </div>
+    <div class="legend" id="net-legend"></div>
+    <div id="net"><div class="loading">Loading entity mentions…</div></div>
+  </section>
+
   <section id="growth">
     <div class="row-head">
       <div><h2>How the database is growing</h2><p class="lede">Articles saved through Canary, cumulative by week.</p></div>
@@ -171,19 +185,6 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <div class="bars" id="focus-bars"><div class="loading">Loading entity mentions…</div></div>
   </section>
 
-  <section id="network">
-    <div class="row-head">
-      <div><h2>Who appears with whom</h2><p class="lede">Pick up to five types to connect, such as people and companies. Large dots are the most-mentioned entities of each type; small grey dots are the articles that mention two or more of them. Drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
-    </div>
-    <fieldset class="types" id="n-types"><legend>Types to connect</legend></fieldset>
-    <div class="netopts">
-      <label>Top <select id="n-count" aria-label="Entities per type"><option>10</option><option selected>20</option><option>40</option><option>80</option></select> per type</label>
-      <label><input type="checkbox" id="n-cross" checked> Only articles that link different types</label>
-      <span id="n-note" class="facts"></span>
-    </div>
-    <div class="legend" id="net-legend"></div>
-    <div id="net"><div class="loading">Loading entity mentions…</div></div>
-  </section>
 
   <section id="places">
     <h2>Where the coverage points</h2>
@@ -489,7 +490,7 @@ function renderNetwork() {
   const links = arts.flatMap(([aid, ks]) => ks.map(k => ({ source: "A:" + aid, target: k })));
   $("#net-legend").innerHTML = NET_GROUPS.filter(g => ents.some(e => group(e) === g)).map(([n, , c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("") +
     `<span><i style="background:var(--muted);border-radius:50%"></i>Article (${fmt.format(arts.length)})</span>`;
-  const W = box.clientWidth || 800, H = 560;
+  const W = box.clientWidth || 800, H = W < 600 ? 480 : 640;
   if (sim) sim.stop();
   if (!ents.length) { box.innerHTML = `<p class="loading">No articles connect ${cross ? "these types" : "these entities"} under the current filters.</p>`; return; }
   const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("role", "img").attr("aria-label", `Network of ${ents.length} entities and ${arts.length} articles`);
@@ -501,14 +502,32 @@ function renderNetwork() {
     .style("cursor", "pointer")
     .on("pointermove", (ev, d) => tip(ev, d.e ? `<b>${esc(d.e.name)}</b><div>${esc(d.e.type)} · ${fmt.format(d.e.arts.size)} articles</div>`
       : `<b>${esc(d.a.title)}</b><div>${esc(d.a.domain)} · ${dfmt.format(d.a.savedAt)}</div>`))
-    .on("pointerleave", untip)
+    .on("pointerenter", (ev, d) => spotlight(d))
+    .on("pointerleave", () => { untip(); spotlight(null); })
     .on("click", (ev, d) => { if (ev.defaultPrevented) return; d.e ? openEntity(d.id) : window.open(safeUrl(d.a.url), "_blank", "noopener"); })
     .call(d3.drag().on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(.2).restart(); d.fx = d.x; d.fy = d.y; })
       .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; }).on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = d.fy = null; }));
   // label the biggest entities only
   const labelled = new Set(sel.flatMap(s => ents.filter(e => groupOf(e) === s).slice(0, Math.ceil(25 / sel.length))).map(e => e.key));
-  const label = g.append("g").selectAll("text").data(nodes.filter(d => labelled.has(d.id))).join("text")
-    .text(d => d.e.name.length > 24 ? d.e.name.slice(0, 23) + "…" : d.e.name).attr("font-size", 11).attr("dy", d => -d.r - 3).attr("text-anchor", "middle");
+  // every entity gets a label; only the biggest show until a hover reveals the connected ones
+  const label = g.append("g").selectAll("text").data(nodes.filter(d => d.e)).join("text")
+    .text(d => d.e.name.length > 24 ? d.e.name.slice(0, 23) + "…" : d.e.name).attr("font-size", 11).attr("dy", d => -d.r - 3).attr("text-anchor", "middle")
+    .attr("opacity", d => labelled.has(d.id) ? 1 : 0);
+  // Hover: an entity lights up its articles and the entities those articles mention; an article lights up its entities.
+  const adj = new Map(nodes.map(n => [n.id, new Set()]));
+  for (const l of links) { adj.get(l.source).add(l.target); adj.get(l.target).add(l.source); }  // ids, before forceLink swaps in objects
+  function spotlight(d) {
+    if (!d) {
+      node.attr("opacity", 1); label.attr("opacity", n => labelled.has(n.id) ? 1 : 0).style("font-weight", null);
+      link.attr("stroke", "var(--axis)").attr("stroke-opacity", .5); return;
+    }
+    const on = new Set([d.id, ...adj.get(d.id)]);
+    if (d.e) for (const a of adj.get(d.id)) for (const k of adj.get(a)) on.add(k);
+    node.attr("opacity", n => on.has(n.id) ? 1 : .08);
+    label.attr("opacity", n => on.has(n.id) ? 1 : 0).style("font-weight", n => n.id === d.id ? 700 : null);
+    const lit = l => on.has(l.source.id) && on.has(l.target.id) && (d.e || l.source.id === d.id || l.target.id === d.id);
+    link.attr("stroke", l => lit(l) ? "var(--ink-2)" : "var(--axis)").attr("stroke-opacity", l => lit(l) ? .8 : .04);
+  }
   sim = d3.forceSimulation(nodes)
     .force("link", d3.forceLink(links).id(d => d.id).distance(30).strength(.4))
     .force("charge", d3.forceManyBody().strength(d => d.e ? -220 : -12))
