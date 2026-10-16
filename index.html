@@ -80,6 +80,8 @@ svg text { fill: var(--muted); font: 11px var(--sans); font-variant-numeric: tab
 .bar .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .tag { font-size: 11px; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 99px; padding: 0 7px; white-space: nowrap; }
 
+#net svg { width: 100%; height: 560px; display: block; background: var(--page); border-radius: 8px; touch-action: none; }
+#net text { fill: var(--ink-2); pointer-events: none; }
 #map svg { width: 100%; height: auto; display: block; }
 #map path.c { stroke: var(--surface); stroke-width: .5; cursor: pointer; }
 #map path.c:hover { stroke: var(--ink); stroke-width: 1; }
@@ -156,6 +158,19 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <h2>Companies</h2>
     <p class="lede">Companies, airlines and state-owned firms named in the saved articles, ranked by how many articles mention them. Select one to see every sentence that names it and what it appears alongside.</p>
     <div class="bars" id="company-bars"><div class="loading">Loading entity mentions…</div></div>
+  </section>
+
+  <section id="network">
+    <div class="row-head">
+      <div><h2>Who appears with whom</h2><p class="lede">The most-mentioned entities (large dots) and the articles that mention two or more of them (small grey dots). Drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
+      <div class="table-tools">
+        <select id="n-type" aria-label="Entities to include">
+          <option value="business" selected>Companies only</option><option value="">All entity types</option><option value="nocountry">Everything but countries</option></select>
+        <select id="n-count" aria-label="Number of entities"><option>20</option><option selected>40</option><option>80</option><option>150</option></select>
+      </div>
+    </div>
+    <div class="legend" id="net-legend"></div>
+    <div id="net"><div class="loading">Loading entity mentions…</div></div>
   </section>
 
   <section id="places">
@@ -349,7 +364,7 @@ function render() {
   renderGrowth(arts);
   if (!mentions.length) return;
   view = aggregate(arts);
-  renderCompanies(); renderMap(); renderTable();
+  renderCompanies(); renderNetwork(); renderMap(); renderTable();
 }
 
 // ---- Growth timeline: stacked cumulative area by week ----
@@ -404,6 +419,60 @@ function renderCompanies() {
       <span class="track"><span class="fill" style="display:block;width:${(e.arts.size / max * 100).toFixed(1)}%"></span></span>
       <span class="n">${fmt.format(e.arts.size)}</span></button>`).join("");
 }
+
+// ---- Network: top entities + articles linking two or more of them ----
+const NET_GROUPS = [["Companies", t => BUSINESS.has(t), "var(--s1)"], ["Government agencies", t => t === "government agency", "var(--s2)"],
+  ["People", t => t === "person", "var(--s3)"], ["Countries", t => t === "country", "var(--s4)"], ["Other", () => true, "var(--s5)"]];
+let sim;
+function renderNetwork() {
+  const t = $("#n-type").value, N = +$("#n-count").value;
+  const ents = view.ents.filter(e => t === "business" ? BUSINESS.has(e.type) : t === "nocountry" ? e.type !== "country" : true)
+    .sort((a, b) => b.arts.size - a.arts.size).slice(0, N);
+  const group = e => NET_GROUPS.find(([, f]) => f(e.type));
+  const artLinks = new Map();
+  for (const e of ents) for (const aid of e.arts) (artLinks.get(aid) || artLinks.set(aid, []).get(aid)).push(e.key);
+  // ponytail: articles linking 2+ shown entities only, capped at 600; past that the layout is a hairball anyway.
+  const arts = [...artLinks].filter(([, ks]) => ks.length > 1).sort((a, b) => b[1].length - a[1].length).slice(0, 600);
+  const maxA = d3.max(ents, e => e.arts.size) || 1, r = d3.scaleSqrt().domain([1, maxA]).range([4, 22]);
+  const nodes = ents.map(e => ({ id: e.key, e, r: r(e.arts.size), color: group(e)[2] }))
+    .concat(arts.map(([aid]) => ({ id: "A:" + aid, a: byArticle.get(aid), r: 2.5 })));
+  const links = arts.flatMap(([aid, ks]) => ks.map(k => ({ source: "A:" + aid, target: k })));
+  $("#net-legend").innerHTML = NET_GROUPS.filter(g => ents.some(e => group(e) === g)).map(([n, , c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("") +
+    `<span><i style="background:var(--muted);border-radius:50%"></i>Article (${fmt.format(arts.length)})</span>`;
+  const box = $("#net"), W = box.clientWidth || 800, H = 560;
+  if (sim) sim.stop();
+  if (!ents.length) { box.innerHTML = `<p class="loading">No entities for these filters.</p>`; return; }
+  const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("role", "img").attr("aria-label", `Network of ${ents.length} entities and ${arts.length} articles`);
+  const g = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([.3, 6]).on("zoom", ev => g.attr("transform", ev.transform)));
+  const link = g.append("g").attr("stroke", "var(--axis)").attr("stroke-opacity", .5).selectAll("line").data(links).join("line");
+  const node = g.append("g").selectAll("circle").data(nodes).join("circle").attr("r", d => d.r)
+    .attr("fill", d => d.e ? d.color : "var(--muted)").attr("stroke", "var(--page)").attr("stroke-width", d => d.e ? 1.5 : .5)
+    .style("cursor", "pointer")
+    .on("pointermove", (ev, d) => tip(ev, d.e ? `<b>${esc(d.e.name)}</b><div>${esc(d.e.type)} · ${fmt.format(d.e.arts.size)} articles</div>`
+      : `<b>${esc(d.a.title)}</b><div>${esc(d.a.domain)} · ${dfmt.format(d.a.savedAt)}</div>`))
+    .on("pointerleave", untip)
+    .on("click", (ev, d) => { if (ev.defaultPrevented) return; d.e ? openEntity(d.id) : window.open(safeUrl(d.a.url), "_blank", "noopener"); })
+    .call(d3.drag().on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(.2).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; }).on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = d.fy = null; }));
+  // label the biggest entities only
+  const labelled = new Set(ents.slice(0, Math.min(25, N)).map(e => e.key));
+  const label = g.append("g").selectAll("text").data(nodes.filter(d => labelled.has(d.id))).join("text")
+    .text(d => d.e.name.length > 24 ? d.e.name.slice(0, 23) + "…" : d.e.name).attr("font-size", 11).attr("dy", d => -d.r - 3).attr("text-anchor", "middle");
+  sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(30).strength(.4))
+    .force("charge", d3.forceManyBody().strength(d => d.e ? -220 : -12))
+    .force("collide", d3.forceCollide(d => d.r + 2))
+    .force("x", d3.forceX(W / 2).strength(.05)).force("y", d3.forceY(H / 2).strength(.08))
+    .on("tick", () => {
+      link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      node.attr("cx", d => d.x).attr("cy", d => d.y); label.attr("x", d => d.x).attr("y", d => d.y);
+    });
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { sim.stop(); sim.tick(300); sim.on("tick")(); }
+  box.replaceChildren(svg.node());
+}
+$("#n-type").addEventListener("change", () => view && renderNetwork());
+$("#n-count").addEventListener("change", () => view && renderNetwork());
 
 // ---- Map ----
 const QUANT = ["--q1", "--q2", "--q3", "--q4", "--q5"];
@@ -462,7 +531,7 @@ function openEntity(key) {
   const srcs = [...perArt].map(([aid, list]) => ({ a: byArticle.get(aid), list })).sort((x, y) => y.a.savedAt - x.a.savedAt);
   const d = t => dfmt.format(new Date(t));
   const dr = $("#drawer");
-  dr.dataset.limit = dr.dataset.key === key ? (dr.dataset.limit || 30) : 30; dr.dataset.key = key;
+  dr.dataset.limit = dr.dataset.current === key ? (dr.dataset.limit || 30) : 30; dr.dataset.current = key;
   const limit = +dr.dataset.limit;
   dr.innerHTML = `<button type="button" class="close" id="close">Close</button>
     <span class="tag">${esc(e.type)}</span><h2 id="d-name">${esc(e.name)}</h2>
@@ -499,7 +568,7 @@ function tip(ev, html) { const t = $("#tip"); t.innerHTML = html; t.hidden = fal
 function untip() { $("#tip").hidden = true; }
 
 // ---- Events ----
-for (const id of ["#f-project", "#f-person", "#f-period"]) $(id).addEventListener("change", () => { shown = 50; render(); if (!$("#drawer").hidden) openEntity($("#drawer").dataset.key); });
+for (const id of ["#f-project", "#f-person", "#f-period"]) $(id).addEventListener("change", () => { shown = 50; render(); if (!$("#drawer").hidden) openEntity($("#drawer").dataset.current); });
 document.querySelectorAll("[data-split]").forEach(b => b.addEventListener("click", () => {
   split = b.dataset.split; document.querySelectorAll("[data-split]").forEach(x => x.setAttribute("aria-pressed", x === b)); renderGrowth(filtered()); }));
 $("#q").addEventListener("input", () => { shown = 50; renderTable(); });
@@ -509,9 +578,9 @@ document.querySelectorAll("[data-sort]").forEach(b => b.addEventListener("click"
   const k = b.dataset.sort; sortDir = sortKey === k ? -sortDir : (k === "name" ? 1 : -1); sortKey = k; renderTable(); }));
 $("#refresh").addEventListener("click", load);
 document.addEventListener("click", ev => {
+  if (ev.target.closest("#close")) { $("#drawer").hidden = true; return; }
   const k = ev.target.closest("[data-key]"); if (k && !k.closest("#drawer .src")) { openEntity(k.dataset.key); return; }
-  if (ev.target.id === "close") $("#drawer").hidden = true;
-  if (ev.target.id === "more-src") { const dr = $("#drawer"); dr.dataset.limit = +dr.dataset.limit + 30; openEntity(dr.dataset.key); }
+  if (ev.target.id === "more-src") { const dr = $("#drawer"); dr.dataset.limit = +dr.dataset.limit + 30; openEntity(dr.dataset.current); }
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Escape") $("#drawer").hidden = true;
