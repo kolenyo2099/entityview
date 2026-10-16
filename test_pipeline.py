@@ -30,3 +30,16 @@ assert out[1][-2:] == ["CoreCivic", "company"]
 assert out[2][-2:] == ["CSI Aviation", "airline"]
 assert out[3][-2:] == ["Ana Reyes", "person"]
 print("curate ok")
+
+from pipeline import clean, domain
+assert domain("https://www.latimes.com/x") == "latimes.com"
+boiler = {"site.com": {"Sign up for our newsletter", "© 2026 Site"}}
+body = "Para one about GEO Group.\nSign up for our newsletter\nPara two.\n© 2026 Site"
+text, removed = clean(body, "https://site.com/a", boiler)
+assert removed == 2 and "newsletter" not in text and "GEO Group" in text, (text, removed)
+# a duplicate story (most lines "repeated") is left whole
+dup = {"site.com": {"Line one of the story.", "Line two of the story.", "Line three."}}
+text, removed = clean("Line one of the story.\nLine two of the story.\nLine three.\nByline", "https://site.com/b", dup)
+assert removed == 0 and text.startswith("Line one")
+assert clean("Anything", "https://other.org/x", boiler) == ("Anything", 0)
+print("clean ok")

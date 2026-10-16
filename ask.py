@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from pipeline import OUT, append, get_text
+from pipeline import OUT, append, clean, get_text, site_boilerplate
 
 HAIKU = "claude-haiku-5-5"
 LMSTUDIO_URL = "http://localhost:1234/v1/chat/completions"
@@ -92,6 +92,7 @@ def main():
             done = {(r["article_id"], r["question"], r["model"]) for r in csv.DictReader(f)}
     with (OUT / "articles.csv").open(encoding="utf-8") as f:
         articles = list(csv.DictReader(f))
+    boiler = site_boilerplate({x["id"]: x["url"] for x in articles})  # same cleaning GLiNER saw
     jobs = [(art, [q for q in questions if (art["id"], q, model) not in done]) for art in articles]
     jobs = [(art, qs) for art, qs in jobs if qs]
     if a.limit:
@@ -107,7 +108,7 @@ def main():
         a.workers = 1  # one local model, one request at a time
 
     def run(art, qs):
-        _, text = get_text(art["id"], art["url"], art["title"])
+        text, _ = clean(get_text(art["id"], art["url"], art["title"])[1], art["url"], boiler)
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         got = {x["question_id"]: x for x in call(prompt(art["title"], text, qs))["answers"]}
         rows = []

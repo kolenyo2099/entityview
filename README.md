@@ -63,6 +63,20 @@ one row per entity with its canonical `name`, `type`, and `|`-separated `aliases
 push time, adding `entity` and `type` columns to the `mentions` tab, so editing it only needs a re-push,
 never a re-extraction. Group by `entity`/`type` in dashboards, not by the raw `text`/`label`.
 
+## How article text is cleaned
+
+- **Precision mode:** trafilatura runs in its stricter mode, which drops more page furniture.
+- **Same-site boilerplate:** any line that recurs in 3+ different articles from the same site
+  (newsletter prompts, copyright lines, "related stories" lists) is removed before GLiNER sees the text.
+  The count of removed lines is in the `boilerplate_lines` column. A story saved several times from one
+  site is left whole, and copies of one story on different sites are never touched.
+- **Paywall flag:** an article that is little more than a subscription prompt is marked
+  `text_source = paywall`.
+
+The raw text stays cached in `out/texts/`; cleaning happens at extraction time, so it improves as more
+articles from each site arrive. Use `--refetch` to download article text again, for example after changing
+the extraction settings.
+
 ## How runs work
 
 - **Extract** only processes Canary rows not already in `out/articles.csv`. Delete `out/articles.csv` and `out/mentions.csv` to reprocess everything (article text stays cached in `out/texts/`).
