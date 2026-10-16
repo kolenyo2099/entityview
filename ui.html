@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canary Pipeline</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#deded8; --accent:#1f5f8b; --ok:#2e7d32; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#20201f; --ink:#ececea; --muted:#9a9a94; --line:#353533; --accent:#6aaee0; --ok:#7bc47f; --bad:#f2827a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; } label:first-of-type { margin-top: 0; }
+  .hint { color: var(--muted); font-size: 13px; font-weight: 400; }
+  input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  textarea { min-height: 130px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; } .row > * { flex: 1 1 200px; }
+  .seg { display: flex; gap: 16px; margin: 4px 0 8px; } .seg label { display: flex; gap: 6px; align-items: center; font-weight: 400; margin: 0; } .seg input { width: auto; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { padding: 9px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; height: 320px; overflow: auto; font-size: 12px; margin: 12px 0 0; white-space: pre-wrap; }
+  .status { font-size: 13px; color: var(--muted); } .ok { color: var(--ok); } .bad { color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Canary Pipeline</h1>
+  <p class="sub">Extract entities from new Canary rows, ask questions with an LLM, push results to the team sheet.</p>
+
+  <section>
+    <h2>Data</h2>
+    <label for="source">Canary CSV <span class="hint">published-to-web CSV link of the sheet Canary writes to</span></label>
+    <input id="source">
+    <div class="row">
+      <div>
+        <label for="sheet_url">Results sheet web app URL <span class="hint">from apps_script.gs</span></label>
+        <input id="sheet_url" placeholder="https://script.google.com/macros/s/…/exec">
+      </div>
+      <div style="flex:0 1 220px">
+        <label for="token">Token</label>
+        <input id="token" type="password" autocomplete="off">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Questions for the LLM</h2>
+    <div class="row">
+      <div>
+        <label for="questions_name">Question set <span class="hint">each set gets its own results tab</span></label>
+        <input id="questions_name" list="sets">
+        <datalist id="sets"></datalist>
+      </div>
+    </div>
+    <label for="questions">One question per line <span class="hint">only new questions or new articles get asked on re-runs</span></label>
+    <textarea id="questions" placeholder="Which companies are named, and what role does each play?"></textarea>
+
+    <label>Model</label>
+    <div class="seg">
+      <label><input type="radio" name="backend" value="lmstudio"> Local (LM Studio)</label>
+      <label><input type="radio" name="backend" value="claude"> Remote (Claude)</label>
+    </div>
+    <div id="local">
+      <select id="model_local"></select>
+      <div id="lm_down" class="status bad" hidden>LM Studio server isn't running. Start it in LM Studio (Developer tab) or run <code>lms server start</code>.</div>
+    </div>
+    <div id="remote" class="row" hidden>
+      <div><input id="model_remote" placeholder="claude-haiku-5-5"></div>
+      <div><input id="api_key" type="password" autocomplete="off" placeholder="Anthropic API key"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Run</h2>
+    <div class="row" style="margin-bottom:12px">
+      <div style="flex:0 1 220px">
+        <label for="limit">Limit <span class="hint">0 = all rows</span></label>
+        <input id="limit" type="number" min="0">
+      </div>
+    </div>
+    <div class="buttons">
+      <button class="primary" data-steps="extract,ask,push">Run all</button>
+      <button data-steps="extract">Extract entities</button>
+      <button data-steps="ask">Ask questions</button>
+      <button data-steps="push">Push to sheet</button>
+      <button id="stop">Stop</button>
+      <span id="status" class="status" style="align-self:center"></span>
+    </div>
+    <pre id="log"></pre>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const post = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+let apiKeySet = false;
+
+function backend() { return document.querySelector('input[name=backend]:checked')?.value || 'lmstudio'; }
+function showBackend() {
+  $('local').hidden = backend() !== 'lmstudio';
+  $('remote').hidden = backend() !== 'claude';
+  $('api_key').placeholder = apiKeySet ? 'API key set (leave empty to keep)' : 'Anthropic API key';
+}
+function form() {
+  const b = backend();
+  return {source: $('source').value.trim(), sheet_url: $('sheet_url').value.trim(), token: $('token').value,
+          backend: b, model: b === 'lmstudio' ? $('model_local').value : $('model_remote').value.trim(),
+          questions_name: $('questions_name').value.trim() || 'default', limit: +$('limit').value || 0,
+          questions: $('questions').value, api_key: $('api_key').value};
+}
+
+async function init() {
+  const s = await (await fetch('/state')).json(), c = s.config;
+  for (const k of ['source', 'sheet_url', 'token', 'questions_name', 'limit']) $(k).value = c[k];
+  $('questions').value = s.questions;
+  $('sets').innerHTML = s.question_sets.map(n => `<option value="${n}">`).join('');
+  document.querySelector(`input[name=backend][value=${c.backend}]`).checked = true;
+  apiKeySet = s.api_key_set;
+  const models = s.lmstudio_models || [];
+  $('lm_down').hidden = s.lmstudio_models !== null;
+  $('model_local').innerHTML = models.map(m => `<option>${m}</option>`).join('');
+  if (c.backend === 'lmstudio' && models.includes(c.model)) $('model_local').value = c.model;
+  if (c.backend === 'claude') $('model_remote').value = c.model;
+  showBackend();
+  render(s);
+}
+
+function render(s) {
+  const log = $('log'), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = s.log.join('\n');
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  document.querySelectorAll('button[data-steps]').forEach(b => b.disabled = s.running);
+  const last = s.log.filter(l => /^[✓✗■]/.test(l)).pop() || '';
+  $('status').textContent = s.running ? 'Running…' : last;
+  $('status').className = 'status ' + (s.running ? '' : last.startsWith('✓') ? 'ok' : last ? 'bad' : '');
+}
+
+async function poll() {
+  render(await (await fetch('/state')).json());
+  setTimeout(poll, 1000);
+}
+
+document.querySelectorAll('input[name=backend]').forEach(r => r.onchange = showBackend);
+$('questions_name').onchange = async () => {
+  const r = await (await fetch('/questions/' + encodeURIComponent($('questions_name').value.trim()))).json();
+  $('questions').value = r.questions;
+};
+document.querySelectorAll('button[data-steps]').forEach(b => b.onclick = async () => {
+  const f = form();
+  let steps = b.dataset.steps.split(',');
+  if (b.dataset.steps.includes(',')) {  // Run all: skip steps that aren't configured
+    if (!f.questions.trim()) steps = steps.filter(s => s !== 'ask');
+    if (!f.sheet_url) steps = steps.filter(s => s !== 'push');
+  }
+  if (steps.includes('ask') && !f.questions.trim()) return alert('Add at least one question.');
+  if (steps.includes('ask') && f.backend === 'claude' && !f.api_key && !apiKeySet) return alert('Enter an Anthropic API key.');
+  if (steps.includes('ask') && f.backend === 'lmstudio' && !f.model) return alert('Start LM Studio and pick a model.');
+  if (steps.includes('push') && (!f.sheet_url || !f.token)) return alert('Set the results sheet URL and token.');
+  const r = await post('/run', {...f, steps});
+  if (!r.ok) alert((await r.json()).error);
+  if (f.api_key) { apiKeySet = true; $('api_key').value = ''; showBackend(); }
+});
+$('stop').onclick = () => post('/stop', {});
+init().then(poll);
+</script>
+</body>
+</html>

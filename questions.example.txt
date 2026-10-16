@@ -1,0 +1,6 @@
+# One question per line. Copy this file, edit freely, and re-run ask.py:
+# only new questions (or new articles) get asked.
+Which companies are named, and what role does each play (contractor, operator, airline, investor, client)?
+Is any contract, payment, or dollar amount mentioned? Give the amount, payer, payee, and purpose.
+Which government agencies or officials are involved, and what did they do?
+Which detention facility is mentioned, and who operates it?

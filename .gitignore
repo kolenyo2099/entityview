@@ -1,0 +1,7 @@
+out/
+config.json
+questions/
+run.log
+__pycache__/
+.claude/
+.DS_Store

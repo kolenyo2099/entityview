@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Canary Explorer</title>
+<style>
+/* Layout: one column of sections under a sticky filter row; entity detail opens in a right-hand drawer. */
+:root {
+  --page: #f6f6f3; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #77756f;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,.10); --hover: rgba(42,120,214,.08);
+  --accent: #2a78d6; --mark: #fde9a6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --q0: #ecebe6; --q1: #cde2fb; --q2: #9ec5f4; --q3: #5598e7; --q4: #256abf; --q5: #104281;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #959389;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,.10); --hover: rgba(57,135,229,.14);
+  --accent: #3987e5; --mark: #5c4a12;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --q0: #262624; --q1: #184f95; --q2: #1c5cab; --q3: #2a78d6; --q4: #5598e7; --q5: #9ec5f4;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #959389;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,.10); --hover: rgba(57,135,229,.14);
+  --accent: #3987e5; --mark: #5c4a12;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  --q0: #262624; --q1: #184f95; --q2: #1c5cab; --q3: #2a78d6; --q4: #5598e7; --q5: #9ec5f4;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 14px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; justify-content: space-between; }
+h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+.status { color: var(--ink-2); font-size: 13px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.status .err { color: #d03b3b; }
+button, select, input { font: inherit; color: var(--ink); }
+button { background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+button:hover { background: var(--hover); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.filters { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--page);
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; padding-block: 12px; margin-bottom: 8px; border-bottom: 1px solid var(--grid); }
+.filters label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.filters select { min-width: 150px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); text-transform: none; letter-spacing: 0; }
+.summary { font-size: 13px; color: var(--ink-2); margin-left: auto; align-self: center; }
+
+section { scroll-margin-top: 90px; background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 18px; margin-top: 16px; min-width: 0; }
+section > h2 { font-size: 15px; margin: 0; }
+section > .lede { color: var(--ink-2); margin: 2px 0 14px; font-size: 13px; max-width: 70ch; }
+.seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 10px; background: var(--surface); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.row-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; flex-wrap: wrap; }
+.loading { color: var(--muted); padding: 24px 0; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+svg text { fill: var(--muted); font: 11px var(--sans); font-variant-numeric: tabular-nums; }
+.axis path, .axis line { stroke: var(--axis); }
+.gridline line { stroke: var(--grid); }
+.gridline path { display: none; }
+
+.two { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 820px) { .two { grid-template-columns: minmax(0, 1fr); } .bar { grid-template-columns: minmax(0, 11em) minmax(0, 1fr) 3em; } }
+
+.bars { display: grid; gap: 2px; }
+.bar { display: grid; grid-template-columns: minmax(0, 20em) minmax(0, 1fr) 3.5em; gap: 10px; align-items: center;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer; background: none; border: 0; text-align: left; width: 100%; }
+.bar:hover, .bar:focus-visible { background: var(--hover); }
+.bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .track { height: 10px; }
+.bar .fill { height: 10px; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.bar .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.tag { font-size: 11px; color: var(--ink-2); border: 1px solid var(--axis); border-radius: 99px; padding: 0 7px; white-space: nowrap; }
+
+#map svg { width: 100%; height: auto; display: block; }
+#map path.c { stroke: var(--surface); stroke-width: .5; cursor: pointer; }
+#map path.c:hover { stroke: var(--ink); stroke-width: 1; }
+.scale { display: flex; gap: 2px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.scale i { width: 28px; height: 10px; display: inline-block; }
+.scale i:first-of-type { border-radius: 2px 0 0 2px; } .scale i:last-of-type { border-radius: 0 2px 2px 0; }
+
+.table-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.table-tools input { flex: 1 1 240px; padding: 6px 10px; border: 1px solid var(--axis); border-radius: 6px; background: var(--page); }
+.table-tools select { padding: 6px 8px; border: 1px solid var(--axis); border-radius: 6px; background: var(--page); }
+.tscroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+th button { all: unset; cursor: pointer; } th button:focus-visible { outline: 2px solid var(--accent); }
+td.num, th.num { text-align: right; }
+tbody tr { cursor: pointer; } tbody tr:hover { background: var(--hover); }
+td.ename { white-space: normal; min-width: 14em; }
+.more { margin-top: 10px; }
+
+#tip { position: fixed; pointer-events: none; z-index: 30; background: var(--ink); color: var(--surface);
+  padding: 6px 9px; border-radius: 6px; font-size: 12px; line-height: 1.4; max-width: 260px; }
+#tip b { font-weight: 600; } #tip .r { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
+
+/* drawer */
+#drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); z-index: 20; background: var(--surface);
+  border-left: 1px solid var(--ring); box-shadow: -12px 0 32px rgba(0,0,0,.12); overflow-y: auto;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) 20px; }
+#drawer h2 { font-size: 20px; margin: 4px 0 2px; text-wrap: balance; }
+#drawer .close { float: right; }
+#drawer h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 6px; }
+.facts { color: var(--ink-2); font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--axis); border-radius: 99px; padding: 2px 10px; font-size: 13px; background: var(--surface); }
+.chip span { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.cogroup { margin-bottom: 8px; } .cogroup b { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
+.src { border-top: 1px solid var(--grid); padding: 10px 0; }
+.src a { color: var(--ink); font-weight: 600; text-decoration: none; } .src a:hover { text-decoration: underline; }
+.src .meta { font: 12px var(--mono); color: var(--muted); margin: 2px 0 6px; }
+.src q { display: block; quotes: none; color: var(--ink-2); padding-left: 10px; border-left: 2px solid var(--grid); margin: 4px 0; }
+mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+@media (prefers-reduced-motion: no-preference) { #drawer { transition: transform .18s ease-out; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Canary Explorer</h1>
+    <div class="status"><span id="status">Loading data from the results sheet…</span><button id="refresh" type="button">Refresh</button></div>
+  </header>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <label>Project <select id="f-project"></select></label>
+    <label>Saved by <select id="f-person"></select></label>
+    <label>Period <select id="f-period">
+      <option value="all">All time</option><option value="365">Last 12 months</option>
+      <option value="90">Last 90 days</option><option value="30">Last 30 days</option></select></label>
+    <span class="summary" id="summary"></span>
+  </div>
+
+  <section id="growth">
+    <div class="row-head">
+      <div><h2>How the database is growing</h2><p class="lede">Articles saved through Canary, cumulative by week.</p></div>
+      <div class="seg" role="group" aria-label="Split timeline by">
+        <button type="button" data-split="person" aria-pressed="true">By person</button>
+        <button type="button" data-split="project" aria-pressed="false">By project</button>
+      </div>
+    </div>
+    <div class="legend" id="growth-legend"></div>
+    <div id="growth-chart"></div>
+  </section>
+
+  <section id="companies">
+    <h2>Companies</h2>
+    <p class="lede">Companies, airlines and state-owned firms named in the saved articles, ranked by how many articles mention them. Select one to see every sentence that names it and what it appears alongside.</p>
+    <div class="bars" id="company-bars"><div class="loading">Loading entity mentions…</div></div>
+  </section>
+
+  <section id="places">
+    <h2>Where the coverage points</h2>
+    <p class="lede">Number of articles that mention each country, in any language. Select a country for its sources.</p>
+    <div class="two">
+      <div id="map"><div class="loading">Loading entity mentions…</div></div>
+      <div><table id="country-table"><thead><tr><th>Country</th><th class="num">Articles</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="entities">
+    <h2>Everything mentioned</h2>
+    <p class="lede">Every named entity found, with its type, article count and when it was first and last saved.</p>
+    <div class="table-tools">
+      <input id="q" type="search" placeholder="Search names: GEO Group, Eswatini, Noem…" aria-label="Search entities">
+      <select id="f-type" aria-label="Entity type"></select>
+    </div>
+    <div class="tscroll"><table id="ent-table">
+      <thead><tr>
+        <th><button type="button" data-sort="name">Entity</button></th><th>Type</th>
+        <th class="num"><button type="button" data-sort="arts">Articles</button></th>
+        <th class="num"><button type="button" data-sort="n">Mentions</button></th>
+        <th><button type="button" data-sort="first">First saved</button></th>
+        <th><button type="button" data-sort="last">Last saved</button></th>
+      </tr></thead><tbody><tr><td colspan="6" class="loading">Loading entity mentions…</td></tr></tbody></table></div>
+    <button type="button" class="more" id="more" hidden>Show 50 more</button>
+  </section>
+</div>
+
+<aside id="drawer" hidden aria-labelledby="d-name"></aside>
+<div id="tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script>
+// ---- Settings: the results sheet, published to the web (File → Share → Publish to web) ----
+const SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQv-L-7R0xmIJcNsuzC4uvs4bHxAayq7Oh-F-W2bXwuUqgG28Q1fMoXFHIa-KKMCalo_IZVZQhs5C_v/pub";
+const ARTICLES_CSV = SHEET + "?gid=219210519&single=true&output=csv";
+const MENTIONS_CSV = SHEET + "?gid=1788497492&single=true&output=csv";
+// Give projects readable names here; unnamed ones show as "Project 1e86".
+const PROJECT_NAMES = {};
+// Saved-by spellings to merge (keys are lowercase).
+const PEOPLE = { guilen: "guillen", guillent: "guillen", kyl: "kyle", kyles: "kyle", kylw: "kyle" };
+const WORLD = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
+
+const BUSINESS = new Set(["company", "airline", "state-owned company"]);
+const HIDDEN_TYPES = new Set(["date"]);  // too noisy to browse
+// GLiNER sometimes tags pronouns as people.
+const PRONOUNS = new Set(["he", "she", "they", "him", "her", "them", "él", "ella", "ellos", "il", "elle", "ils"]);
+const CO_GROUPS = [["Companies", t => BUSINESS.has(t)], ["Government agencies", t => t === "government agency"],
+  ["People", t => t === "person"], ["Countries", t => t === "country"], ["Money amounts", t => t === "money amount"],
+  ["Detention facilities", t => t === "detention facility"], ["Courts", t => t === "court"],
+  ["Organizations", t => /organization|party|armed group/.test(t)]];
+
+const $ = s => document.querySelector(s);
+const fmt = new Intl.NumberFormat("en");
+const dfmt = new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric" });
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const safeUrl = u => /^https?:\/\//i.test(u) ? u : "#";
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+// ---- Names → keys ----
+const SUFFIX = /\s+(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|plc|sa|s a|sas|ag|gmbh|lp|llp|nv|bv)$/;
+function normKey(s) {  // same grouping as pipeline.py norm()
+  let t = s.toLowerCase().replace(/[^\p{L}\p{N}\s&]/gu, " ").replace(/\s+/g, " ").trim().replace(/^the /, ""), u;
+  while ((u = t.replace(SUFFIX, "")) !== t) t = u;
+  return t;
+}
+const ckey = s => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/&/g, " and ").replace(/^\s*the\s+/, "").replace(/[^\p{L}]/gu, "");
+
+// Country names in many languages → ISO code, from the browser's own CLDR data.
+const EN = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
+const COUNTRY = new Map(), CLASH = new Set();
+(function buildCountries() {
+  const langs = ["en", "es", "fr", "pt", "it", "de", "ca", "ro", "nl", "ru", "el", "ar", "pl", "sq"].map(l => new Intl.DisplayNames([l], { type: "region", fallback: "none" }));
+  const skip = new Set(["EU", "EZ", "UN", "QO", "ZZ"]);
+  const add = (name, code) => { const k = ckey(name); if (!k) return;
+    if (COUNTRY.has(k) && COUNTRY.get(k) !== code) CLASH.add(k); else COUNTRY.set(k, code); };
+  for (let a = 65; a < 91; a++) for (let b = 65; b < 91; b++) {
+    const code = String.fromCharCode(a, b);
+    // retired codes (SU, FX, BU…) would clash with today's countries
+    if (skip.has(code) || !EN.of(code) || new Intl.Locale("und-" + code).region !== code) continue;
+    for (const dn of langs) { const n = dn.of(code); if (!n) continue;
+      add(n, code); add(n.replace(/\s*\(.*\)/, ""), code);
+      const paren = n.match(/\((.*)\)/); if (paren) add(paren[1], code); }
+  }
+  const alias = { US: "U.S.|USA|America|EEUU|EE.UU.|EUA|United States of America|Etats-Unis|США|ΗΠΑ",
+    GB: "UK|U.K.|Britain|Great Britain|England", AE: "UAE|U.A.E.", CF: "CAR|Central African Rep.",
+    CD: "DRC|RDC|DR Congo|RD Congo|Democratic Republic of Congo|Democratic Republic of the Congo|Dem. Rep. Congo|Congo-Kinshasa|República Democrática del Congo|République démocratique du Congo|República Democrática do Congo",
+    CG: "Republic of Congo|Republic of the Congo|Congo-Brazzaville|Congo Brazzaville|République du Congo", MM: "Burma", LC: "St Lucia|St. Lucia", KN: "St Kitts and Nevis|St. Kitts and Nevis|Saint Kitts and Nevis",
+    TR: "Turkey", AG: "Antigua", VC: "St. Vincent and the Grenadines|St. Vin. and Gren.", CI: "Ivory Coast|Côte d'Ivoire", SZ: "Swaziland|eSwatini",
+    GQ: "Eq. Guinea", SS: "S. Sudan", DO: "Dominican Rep.", BA: "Bosnia and Herz.", SB: "Solomon Is.", AG: "Antigua and Barb.",
+    CV: "Cape Verde|Cabo Verde", MK: "Macedonia", CZ: "Czech Republic", ST: "São Tomé and Principe", EH: "W. Sahara", MH: "Marshall Is.",
+    PS: "Palestine", VA: "Vatican", TL: "East Timor", KR: "S. Korea", KP: "N. Korea" };
+  for (const [code, names] of Object.entries(alias)) for (const n of names.split("|")) COUNTRY.set(ckey(n), code);
+  // ponytail: "Congo" alone is ambiguous (Kinshasa or Brazzaville), so it stays off the map instead of being guessed.
+  for (const k of [...CLASH, "congo"]) if (!Object.values(alias).some(v => v.split("|").some(n => ckey(n) === k))) COUNTRY.delete(k);
+})();
+const countryCode = name => COUNTRY.get(ckey(name));
+// On the map "Congo" is the Brazzaville polygon (Kinshasa is "Dem. Rep. Congo"), so it is safe there.
+const mapCode = name => name === "Congo" ? "CG" : countryCode(name);
+
+// ---- State ----
+let articles = [], mentions = [], byArticle = new Map(), entityInfo = new Map(), world = null;
+let split = "person", sortKey = "arts", sortDir = -1, shown = 50, colorOf = {};
+let view = null;  // aggregates for the current filters
+
+function person(s) { const k = (s || "").trim().toLowerCase(); return cap(PEOPLE[k] || k || "unknown"); }
+function projectName(id) { return PROJECT_NAMES[id] || "Project " + id.slice(0, 4); }
+
+function load() {
+  $("#status").textContent = "Loading data from the results sheet…";
+  const t0 = performance.now();
+  const parse = url => new Promise((res, rej) => Papa.parse(url, { download: true, header: true, skipEmptyLines: true,
+    complete: r => res(r.data), error: e => rej(e) }));
+  const arts = parse(ARTICLES_CSV).then(rows => {
+    articles = rows.filter(r => r.id).map(r => ({ ...r, savedAt: new Date(r.saved_at), person: person(r.saved_by),
+      project: r.project_id, domain: (r.url.match(/^https?:\/\/(?:www\.)?([^/]+)/) || [])[1] || "" }));
+    byArticle = new Map(articles.map(a => [a.id, a]));
+    setupFilters(); render();
+  });
+  const ments = Promise.all([parse(MENTIONS_CSV), fetch(WORLD).then(r => r.json()).catch(() => null), arts]).then(([rows, w]) => {
+    world = w;
+    prepareMentions(rows); render();
+    $("#status").textContent = `${fmt.format(articles.length)} articles · ${fmt.format(mentions.length)} entity mentions · loaded ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} in ${Math.round((performance.now() - t0) / 1000)}s`;
+  });
+  Promise.all([arts, ments]).catch(e => {
+    $("#status").innerHTML = `<span class="err">Couldn't load the sheet (${esc(e.message || e)}). Check it is still published to the web, then Refresh.</span>`;
+  });
+}
+
+function prepareMentions(rows) {
+  const names = new Map(), types = new Map();
+  mentions = [];
+  for (const r of rows) {
+    const type = r.type || r.label;
+    if (!r.article_id || HIDDEN_TYPES.has(type) || !byArticle.has(r.article_id) || PRONOUNS.has((r.text || "").toLowerCase())) continue;
+    const raw = r.entity || r.text;
+    let key, name;
+    const code = type === "country" && countryCode(raw);
+    if (code) { key = "C:" + code; name = EN.of(code); } else { key = normKey(raw); name = raw; }
+    if (!key) continue;
+    mentions.push({ aid: r.article_id, key, raw: r.text, ctx: r.context, type });
+    const nm = names.get(key) || names.set(key, new Map()).get(key); nm.set(name, (nm.get(name) || 0) + 1);
+    const tm = types.get(key) || types.set(key, new Map()).get(key); tm.set(type, (tm.get(type) || 0) + 1);
+  }
+  const top = m => [...m].sort((a, b) => b[1] - a[1])[0][0];
+  entityInfo = new Map([...names.keys()].map(k => [k, { key: k, name: top(names.get(k)), type: k.startsWith("C:") ? "country" : top(types.get(k)), code: k.startsWith("C:") ? k.slice(2) : null }]));
+  const types2 = [...new Set([...entityInfo.values()].map(e => e.type))].sort();
+  $("#f-type").innerHTML = `<option value="">All types</option><option value="business">Companies (all kinds)</option>` +
+    types2.map(t => `<option value="${esc(t)}">${esc(cap(t))}</option>`).join("");
+}
+
+function setupFilters() {
+  const opt = (sel, items, label) => { const cur = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` + items.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur; };
+  const count = f => [...d3.rollup(articles, v => v.length, f)].sort((a, b) => b[1] - a[1]);
+  const projects = count(a => a.project), people = count(a => a.person);
+  opt($("#f-project"), projects.map(([p, n]) => [p, `${projectName(p)} (${n})`]), "All projects");
+  opt($("#f-person"), people.map(([p, n]) => [p, `${p} (${n})`]), "Everyone");
+  // Color follows the entity: assigned once by overall size, never re-ranked by filters. Five slots max, rest is "Other".
+  colorOf = {};
+  for (const [k, list] of [["person", people], ["project", projects]])
+    list.forEach(([v], i) => colorOf[k + ":" + v] = i < 4 ? `var(--s${i + 1})` : "var(--axis)");
+}
+
+function filtered() {
+  const p = $("#f-project").value, who = $("#f-person").value, days = $("#f-period").value;
+  const since = days === "all" ? null : Date.now() - days * 864e5;
+  return articles.filter(a => (!p || a.project === p) && (!who || a.person === who) && (!since || a.savedAt >= since));
+}
+
+function aggregate(arts) {
+  const ids = new Set(arts.map(a => a.id)), ents = new Map();
+  for (const m of mentions) {
+    if (!ids.has(m.aid)) continue;
+    let e = ents.get(m.key);
+    if (!e) ents.set(m.key, e = { ...entityInfo.get(m.key), arts: new Set(), n: 0, first: Infinity, last: -Infinity });
+    e.arts.add(m.aid); e.n++;
+    const t = byArticle.get(m.aid).savedAt.getTime(); if (t < e.first) e.first = t; if (t > e.last) e.last = t;
+  }
+  return { arts, ids, ents: [...ents.values()] };
+}
+
+function render() {
+  const arts = filtered();
+  $("#summary").textContent = `${fmt.format(arts.length)} of ${fmt.format(articles.length)} articles`;
+  renderGrowth(arts);
+  if (!mentions.length) return;
+  view = aggregate(arts);
+  renderCompanies(); renderMap(); renderTable();
+}
+
+// ---- Growth timeline: stacked cumulative area by week ----
+function renderGrowth(arts) {
+  const box = $("#growth-chart");
+  if (!arts.length) { box.innerHTML = `<p class="loading">No articles match these filters.</p>`; $("#growth-legend").innerHTML = ""; return; }
+  const keyOf = a => split === "person" ? a.person : a.project;
+  const totals = d3.rollup(arts, v => v.length, keyOf);
+  const order = Object.keys(colorOf).filter(k => k.startsWith(split + ":")).map(k => k.slice(split.length + 1)).filter(k => totals.has(k));
+  const main = order.slice(0, 4), series = main.concat(order.length > 4 ? ["Other"] : []);
+  const label = k => k === "Other" ? "Other" : split === "person" ? k : projectName(k);
+  const color = k => k === "Other" ? "var(--axis)" : colorOf[split + ":" + k];
+  const weeks = d3.timeWeek.range(d3.timeWeek.floor(d3.min(arts, a => a.savedAt)), d3.timeWeek.offset(d3.max(arts, a => a.savedAt), 1));
+  const perWeek = d3.rollup(arts, v => v.length, a => +d3.timeWeek.floor(a.savedAt), a => main.includes(keyOf(a)) ? keyOf(a) : "Other");
+  const run = Object.fromEntries(series.map(s => [s, 0]));
+  const data = weeks.map(w => { const row = { week: w }; const m = perWeek.get(+w);
+    for (const s of series) { run[s] += m?.get(s) || 0; row[s] = run[s]; } return row; });
+  const stack = d3.stack().keys(series)(data);
+
+  $("#growth-legend").innerHTML = series.map(s => `<span><i style="background:${color(s)}"></i>${esc(label(s))} · ${fmt.format(s === "Other" ? arts.filter(a => !main.includes(keyOf(a))).length : totals.get(s))}</span>`).join("");
+  const W = box.clientWidth || 800, H = 260, m = { t: 8, r: 64, b: 24, l: 44 };
+  const x = d3.scaleTime().domain(d3.extent(weeks)).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, d3.max(stack.at(-1), d => d[1]) || 1]).nice().range([H - m.b, m.t]);
+  const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("width", "100%").attr("role", "img")
+    .attr("aria-label", `Cumulative articles saved per week, ${arts.length} in total`);
+  svg.append("g").attr("class", "gridline").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(""));
+  svg.append("g").selectAll("path").data(stack).join("path").attr("fill", d => color(d.key)).attr("stroke", "var(--surface)").attr("stroke-width", 1.5)
+    .attr("d", d3.area().x(d => x(d.data.week)).y0(d => y(d[0])).y1(d => y(d[1])).curve(d3.curveMonotoneX));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(W / 110))).tickSizeOuter(0));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSizeOuter(0)).call(g => g.select(".domain").remove());
+  const end = data.at(-1), endTotal = series.reduce((s, k) => s + end[k], 0);
+  svg.append("text").attr("x", W - m.r + 6).attr("y", y(endTotal) + 4).style("fill", "var(--ink)").style("font-weight", 600).text(fmt.format(endTotal));
+  const cross = svg.append("line").attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "var(--ink-2)").attr("opacity", 0);
+  svg.append("rect").attr("x", m.l).attr("y", m.t).attr("width", W - m.l - m.r).attr("height", H - m.t - m.b).attr("fill", "transparent")
+    .on("pointermove", ev => {
+      const [px] = d3.pointer(ev); const i = d3.bisectCenter(data.map(d => +d.week), +x.invert(px)); const d = data[i];
+      cross.attr("x1", x(d.week)).attr("x2", x(d.week)).attr("opacity", .5);
+      tip(ev, `<b>Week of ${dfmt.format(d.week)}</b>` + series.slice().reverse().map(s => `<div class="r"><span>${esc(label(s))}</span><span>${fmt.format(d[s])}</span></div>`).join("") +
+        `<div class="r"><span>Total</span><b>${fmt.format(series.reduce((t, s) => t + d[s], 0))}</b></div>`);
+    }).on("pointerleave", () => { cross.attr("opacity", 0); untip(); });
+  box.replaceChildren(svg.node());
+}
+
+// ---- Companies ----
+function renderCompanies() {
+  const top = view.ents.filter(e => BUSINESS.has(e.type)).sort((a, b) => b.arts.size - a.arts.size).slice(0, 25);
+  const box = $("#company-bars");
+  if (!top.length) { box.innerHTML = `<p class="loading">No companies in the articles matching these filters.</p>`; return; }
+  const max = top[0].arts.size;
+  box.innerHTML = top.map(e => `<button type="button" class="bar" data-key="${esc(e.key)}">
+      <span class="name">${esc(e.name)} ${e.type !== "company" ? `<span class="tag">${esc(e.type)}</span>` : ""}</span>
+      <span class="track"><span class="fill" style="display:block;width:${(e.arts.size / max * 100).toFixed(1)}%"></span></span>
+      <span class="n">${fmt.format(e.arts.size)}</span></button>`).join("");
+}
+
+// ---- Map ----
+const QUANT = ["--q1", "--q2", "--q3", "--q4", "--q5"];
+function renderMap() {
+  const counts = new Map(view.ents.filter(e => e.code).map(e => [e.code, e]));
+  const ranked = [...counts.values()].sort((a, b) => b.arts.size - a.arts.size);
+  $("#country-table tbody").innerHTML = ranked.slice(0, 15).map(e => `<tr data-key="${esc(e.key)}"><td>${esc(e.name)}</td><td class="num">${fmt.format(e.arts.size)}</td></tr>`).join("")
+    || `<tr><td colspan="2" class="loading">No countries for these filters.</td></tr>`;
+  const box = $("#map");
+  if (!world) { box.innerHTML = `<p class="loading">The world map couldn't load; the table lists the countries.</p>`; return; }
+  const max = ranked[0]?.arts.size || 1;
+  // Log-spaced bins: coverage is very skewed (the US is in most articles).
+  const edges = [1, ...d3.range(1, 5).map(i => Math.round(Math.pow(max, i / 5)))].filter((v, i, a) => i === 0 || v > a[i - 1]);
+  const bin = n => n ? QUANT[Math.min(QUANT.length - 1, d3.bisectRight(edges, n) - 1)] : "--q0";
+  const feats = topojson.feature(world, world.objects.countries).features.filter(f => f.properties.name !== "Antarctica");
+  const W = box.clientWidth || 700, H = Math.round(W * 0.5);
+  const proj = d3.geoNaturalEarth1().fitSize([W, H], { type: "FeatureCollection", features: feats }), path = d3.geoPath(proj);
+  const svg = d3.create("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("role", "img").attr("aria-label", "Map of articles per country; the table beside it lists the top countries");
+  svg.append("g").selectAll("path").data(feats).join("path").attr("class", "c").attr("d", path)
+    .attr("fill", f => { const e = counts.get(mapCode(f.properties.name)); return `var(${bin(e?.arts.size || 0)})`; })
+    .on("pointermove", (ev, f) => { const e = counts.get(mapCode(f.properties.name));
+      tip(ev, `<b>${esc(e?.name || f.properties.name)}</b><div>${fmt.format(e?.arts.size || 0)} articles</div>`); })
+    .on("pointerleave", untip)
+    .on("click", (ev, f) => { const e = counts.get(mapCode(f.properties.name)); if (e) openEntity(e.key); });
+  const labels = edges.map((v, i) => i === edges.length - 1 ? `${fmt.format(v)}+` : edges[i + 1] - 1 > v ? `${fmt.format(v)}–${fmt.format(edges[i + 1] - 1)}` : fmt.format(v));
+  const scale = document.createElement("div"); scale.className = "scale";
+  scale.innerHTML = `<span style="margin-right:6px">Articles</span>` + labels.map((l, i) => `<i style="background:var(${QUANT[i]})" title="${l}"></i>`).join("") +
+    `<span style="margin-left:6px">${labels[0]} … ${labels.at(-1)}</span>`;
+  box.replaceChildren(svg.node(), scale);
+}
+
+// ---- Entity table ----
+function renderTable() {
+  const q = normKey($("#q").value), t = $("#f-type").value;
+  let rows = view.ents.filter(e => (!t || (t === "business" ? BUSINESS.has(e.type) : e.type === t)) &&
+    (!q || normKey(e.name).includes(q) || e.key.includes(q)));
+  const val = e => sortKey === "arts" ? e.arts.size : sortKey === "name" ? e.name.toLowerCase() : e[sortKey];
+  rows.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sortDir || b.arts.size - a.arts.size);
+  const d = t => dfmt.format(new Date(t));
+  $("#ent-table tbody").innerHTML = rows.slice(0, shown).map(e => `<tr data-key="${esc(e.key)}" tabindex="0"><td class="ename">${esc(e.name)}</td><td>${esc(e.type)}</td>
+    <td class="num">${fmt.format(e.arts.size)}</td><td class="num">${fmt.format(e.n)}</td><td>${d(e.first)}</td><td>${d(e.last)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="loading">Nothing matches.</td></tr>`;
+  $("#more").hidden = rows.length <= shown;
+  $("#more").textContent = `Show 50 more (${fmt.format(rows.length - shown)} left)`;
+}
+
+// ---- Entity drawer: co-mentions + source sentences ----
+function openEntity(key) {
+  const e = view.ents.find(x => x.key === key); if (!e) return;
+  const ms = mentions.filter(m => m.key === key && view.ids.has(m.aid));
+  const co = new Map();
+  for (const m of mentions) if (m.key !== key && e.arts.has(m.aid)) { const s = co.get(m.key) || co.set(m.key, new Set()).get(m.key); s.add(m.aid); }
+  const coList = [...co].map(([k, s]) => ({ ...entityInfo.get(k), n: s.size })).sort((a, b) => b.n - a.n);
+  const groups = CO_GROUPS.map(([title, test]) => [title, coList.filter(c => test(c.type)).slice(0, 10)]).filter(([, l]) => l.length);
+  const perArt = d3.group(ms, m => m.aid);
+  const srcs = [...perArt].map(([aid, list]) => ({ a: byArticle.get(aid), list })).sort((x, y) => y.a.savedAt - x.a.savedAt);
+  const d = t => dfmt.format(new Date(t));
+  const dr = $("#drawer");
+  dr.dataset.limit = dr.dataset.key === key ? (dr.dataset.limit || 30) : 30; dr.dataset.key = key;
+  const limit = +dr.dataset.limit;
+  dr.innerHTML = `<button type="button" class="close" id="close">Close</button>
+    <span class="tag">${esc(e.type)}</span><h2 id="d-name">${esc(e.name)}</h2>
+    <div class="facts">${fmt.format(e.arts.size)} articles · ${fmt.format(e.n)} mentions · saved ${d(e.first)} – ${d(e.last)}</div>
+    <h3>Appears alongside</h3>${groups.map(([t, l]) => `<div class="cogroup"><b>${t}</b><div class="chips">${l.map(c =>
+      `<button type="button" class="chip" data-key="${esc(c.key)}">${esc(c.name)}<span>${fmt.format(c.n)}</span></button>`).join("")}</div></div>`).join("") || "<p class='facts'>Nothing else in these articles.</p>"}
+    <h3>Source sentences</h3>
+    ${srcs.slice(0, limit).map(({ a, list }) => {
+      const seen = new Set(), ctxs = list.filter(m => m.ctx && !seen.has(m.ctx) && seen.add(m.ctx)).slice(0, 3);
+      return `<div class="src"><a href="${esc(safeUrl(a.url) + fragment(ctxs[0]))}" target="_blank" rel="noopener noreferrer">${esc(a.title)}</a>
+        <div class="meta">${esc(a.domain)} · ${d(a.savedAt)} · ${esc(a.language || "?")} · saved by ${esc(a.person)}</div>
+        ${ctxs.map(m => `<q>${highlight(m.ctx, m.raw)}</q>`).join("")}</div>`; }).join("")}
+    ${srcs.length > limit ? `<button type="button" id="more-src">Show ${Math.min(30, srcs.length - limit)} more articles</button>` : ""}`;
+  dr.hidden = false;
+  $("#close").focus({ preventScroll: true });
+}
+function highlight(ctx, raw) {
+  const t = ctx.trim(), i = raw ? t.indexOf(raw) : -1;
+  const body = i < 0 ? esc(t) : esc(t.slice(0, i)) + "<mark>" + esc(raw) + "</mark>" + esc(t.slice(i + raw.length));
+  return "…" + body + "…";
+}
+// Text fragment: browsers that support it scroll to and highlight the sentence in the original article.
+function fragment(m) {
+  if (!m?.ctx || !m.raw) return "";
+  const i = m.ctx.indexOf(m.raw); if (i < 0) return "#:~:text=" + encodeURIComponent(m.raw);
+  const words = m.ctx.slice(i).split(/\s+/).slice(0, 6).join(" ");
+  return "#:~:text=" + encodeURIComponent(words).replace(/-/g, "%2D");
+}
+
+// ---- Tooltip ----
+function tip(ev, html) { const t = $("#tip"); t.innerHTML = html; t.hidden = false;
+  const x = Math.min(ev.clientX + 14, innerWidth - t.offsetWidth - 8), y = Math.min(ev.clientY + 14, innerHeight - t.offsetHeight - 8);
+  t.style.left = x + "px"; t.style.top = y + "px"; }
+function untip() { $("#tip").hidden = true; }
+
+// ---- Events ----
+for (const id of ["#f-project", "#f-person", "#f-period"]) $(id).addEventListener("change", () => { shown = 50; render(); if (!$("#drawer").hidden) openEntity($("#drawer").dataset.key); });
+document.querySelectorAll("[data-split]").forEach(b => b.addEventListener("click", () => {
+  split = b.dataset.split; document.querySelectorAll("[data-split]").forEach(x => x.setAttribute("aria-pressed", x === b)); renderGrowth(filtered()); }));
+$("#q").addEventListener("input", () => { shown = 50; renderTable(); });
+$("#f-type").addEventListener("change", () => { shown = 50; renderTable(); });
+$("#more").addEventListener("click", () => { shown += 50; renderTable(); });
+document.querySelectorAll("[data-sort]").forEach(b => b.addEventListener("click", () => {
+  const k = b.dataset.sort; sortDir = sortKey === k ? -sortDir : (k === "name" ? 1 : -1); sortKey = k; renderTable(); }));
+$("#refresh").addEventListener("click", load);
+document.addEventListener("click", ev => {
+  const k = ev.target.closest("[data-key]"); if (k && !k.closest("#drawer .src")) { openEntity(k.dataset.key); return; }
+  if (ev.target.id === "close") $("#drawer").hidden = true;
+  if (ev.target.id === "more-src") { const dr = $("#drawer"); dr.dataset.limit = +dr.dataset.limit + 30; openEntity(dr.dataset.key); }
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") $("#drawer").hidden = true;
+  if (ev.key === "Enter" && ev.target.matches("tr[data-key]")) openEntity(ev.target.dataset.key);
+});
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+load();
+</script>
+</body>
+</html>
