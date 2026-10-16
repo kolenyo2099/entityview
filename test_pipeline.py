@@ -3,6 +3,7 @@ from pipeline import chunks, keep, label, norm
 assert label({"text": "Imperial Valley Gateway Center LLC", "label": "non-profit organization"}) == "company"
 assert label({"text": "Thomas Greg & Sons S.A.", "label": "organization"}) == "company"
 assert label({"text": "Coco", "label": "person"}) == "person"  # 'co' suffix needs a word before it
+assert label({"text": "Acme LLC", "label": "organization"}, ["person", "organization"]) == "organization"  # no company type wanted
 assert not keep({"text": "lawyers", "label": "company"})
 assert keep({"text": "ICE", "label": "government agency"}) and keep({"text": "last week", "label": "date"})
 

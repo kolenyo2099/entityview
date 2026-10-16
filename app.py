@@ -10,14 +10,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
-from pipeline import CANARY_CSV
+from pipeline import CANARY_CSV, LABELS
 
 HERE = Path(__file__).parent
 CONFIG = HERE / "config.json"
 QDIR = HERE / "questions"
 LMSTUDIO_MODELS = "http://localhost:1234/v1/models"
 DEFAULTS = {"source": CANARY_CSV, "sheet_url": "", "token": "", "backend": "lmstudio",
-            "model": "", "questions_name": "default", "limit": 0}
+            "model": "", "questions_name": "default", "limit": 0, "labels": "\n".join(LABELS)}
 
 job = {"proc": None, "log": [], "running": False}
 api_key = {"value": os.environ.get("ANTHROPIC_API_KEY", "")}
@@ -40,11 +40,13 @@ def lmstudio_models():
         return None  # server not running
 
 
-def commands(steps, c):
+def commands(steps, c, reextract=False):
     limit = ["--limit", str(c["limit"])] if int(c["limit"] or 0) else []
+    labels = ",".join(x.strip() for x in c["labels"].splitlines() if x.strip())
     uv = ["uv", "run", "--quiet"]
     cmds = {
-        "extract": uv + ["pipeline.py", "--source", c["source"]] + limit,
+        "extract": uv + ["pipeline.py", "--source", c["source"]] + (["--labels", labels] if labels else [])
+                   + (["--all"] if reextract else []) + limit,
         "ask": uv + ["ask.py", str(qfile(c["questions_name"])),
                      "--backend", c["backend"]]
                + (["--model", c["model"]] if c["model"] else []) + limit,
@@ -53,13 +55,13 @@ def commands(steps, c):
     return [(s, cmds[s]) for s in steps]
 
 
-def run(steps, c):
+def run(steps, c, reextract=False):
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "SHEET_URL": c["sheet_url"], "SHEET_TOKEN": c["token"]}
     if api_key["value"]:
         env["ANTHROPIC_API_KEY"] = api_key["value"]
     log = job["log"]
     try:
-        for step, cmd in commands(steps, c):
+        for step, cmd in commands(steps, c, reextract):
             log.append(f"\n▶ {step}")
             p = job["proc"] = subprocess.Popen(cmd, cwd=HERE, env=env, text=True,
                                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -85,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             return self.send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
-        if self.path == "/explorer":
+        if self.path in ("/explorer", "/viewer"):
             return self.send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         if self.path.startswith("/state"):
             c = load_config()
@@ -93,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {
                 "config": c, "questions": qf.read_text("utf-8") if qf.exists() else "",
                 "question_sets": sorted(p.stem for p in QDIR.glob("*.txt")),
-                "lmstudio_models": lmstudio_models(), "api_key_set": bool(api_key["value"]),
+                "lmstudio_models": lmstudio_models(), "api_key_set": bool(api_key["value"]), "default_labels": "\n".join(LABELS),
                 "running": job["running"], "log": job["log"][-400:]})
         if self.path.startswith("/questions/"):
             qf = qfile(self.path.rsplit("/", 1)[1])
@@ -120,7 +122,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(409, {"error": "a run is already in progress"})
             steps = [s for s in body.get("steps", []) if s in ("extract", "ask", "push")]
             job.update(running=True, log=[])
-            threading.Thread(target=run, args=(steps, c), daemon=True).start()
+            # re-extract is per run, never saved: left on, every run would redo the whole sheet
+            threading.Thread(target=run, args=(steps, c, bool(body.get("reextract"))), daemon=True).start()
             return self.send(200, {"ok": True})
         if self.path == "/stop":
             if job["proc"]:

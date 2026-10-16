@@ -136,6 +136,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   <div class="filters" role="group" aria-label="Filters">
     <label>Project <select id="f-project"></select></label>
     <label>Saved by <select id="f-person"></select></label>
+    <label>Focus <select id="f-focus"><option value="">Loading…</option></select></label>
     <label>Period <select id="f-period">
       <option value="all">All time</option><option value="365">Last 12 months</option>
       <option value="90">Last 90 days</option><option value="30">Last 30 days</option></select></label>
@@ -154,10 +155,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <div id="growth-chart"></div>
   </section>
 
-  <section id="companies">
-    <h2>Companies</h2>
-    <p class="lede">Companies, airlines and state-owned firms named in the saved articles, ranked by how many articles mention them. Select one to see every sentence that names it and what it appears alongside.</p>
-    <div class="bars" id="company-bars"><div class="loading">Loading entity mentions…</div></div>
+  <section id="focus">
+    <h2 id="focus-title">Most mentioned</h2>
+    <p class="lede">Ranked by how many saved articles mention them. Select one to see every sentence that names it and what it appears alongside. Change the type with Focus above.</p>
+    <div class="bars" id="focus-bars"><div class="loading">Loading entity mentions…</div></div>
   </section>
 
   <section id="network">
@@ -165,7 +166,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
       <div><h2>Who appears with whom</h2><p class="lede">The most-mentioned entities (large dots) and the articles that mention two or more of them (small grey dots). Drag to rearrange, scroll to zoom, select an entity for its sources or an article to open it.</p></div>
       <div class="table-tools">
         <select id="n-type" aria-label="Entities to include">
-          <option value="business" selected>Companies only</option><option value="">All entity types</option><option value="nocountry">Everything but countries</option></select>
+          <option value="focus" selected>Focus type only</option><option value="">All entity types</option><option value="nocountry">Everything but countries</option></select>
         <select id="n-count" aria-label="Number of entities"><option>20</option><option selected>40</option><option>80</option><option>150</option></select>
       </div>
     </div>
@@ -186,7 +187,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
     <h2>Everything mentioned</h2>
     <p class="lede">Every named entity found, with its type, article count and when it was first and last saved.</p>
     <div class="table-tools">
-      <input id="q" type="search" placeholder="Search names: GEO Group, Eswatini, Noem…" aria-label="Search entities">
+      <input id="q" type="search" placeholder="Search names…" aria-label="Search entities">
       <select id="f-type" aria-label="Entity type"></select>
     </div>
     <div class="tscroll"><table id="ent-table">
@@ -218,14 +219,13 @@ const PROJECT_NAMES = {};
 const PEOPLE = { guilen: "guillen", guillent: "guillen", kyl: "kyle", kyles: "kyle", kylw: "kyle" };
 const WORLD = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json";
 
+// Shown as one "Companies (all kinds)" choice when the data has these types; every other type is listed as itself.
 const BUSINESS = new Set(["company", "airline", "state-owned company"]);
+const inType = (t, sel) => sel === "business" ? BUSINESS.has(t) : t === sel;
+const typeLabel = sel => sel === "business" ? "Companies (all kinds)" : cap(sel);
 const HIDDEN_TYPES = new Set(["date"]);  // too noisy to browse
 // GLiNER sometimes tags pronouns as people.
 const PRONOUNS = new Set(["he", "she", "they", "him", "her", "them", "él", "ella", "ellos", "il", "elle", "ils"]);
-const CO_GROUPS = [["Companies", t => BUSINESS.has(t)], ["Government agencies", t => t === "government agency"],
-  ["People", t => t === "person"], ["Countries", t => t === "country"], ["Money amounts", t => t === "money amount"],
-  ["Detention facilities", t => t === "detention facility"], ["Courts", t => t === "court"],
-  ["Organizations", t => /organization|party|armed group/.test(t)]];
 
 const $ = s => document.querySelector(s);
 const fmt = new Intl.NumberFormat("en");
@@ -322,8 +322,15 @@ function prepareMentions(rows) {
   const top = m => [...m].sort((a, b) => b[1] - a[1])[0][0];
   entityInfo = new Map([...names.keys()].map(k => [k, { key: k, name: top(names.get(k)), type: k.startsWith("C:") ? "country" : top(types.get(k)), code: k.startsWith("C:") ? k.slice(2) : null }]));
   const types2 = [...new Set([...entityInfo.values()].map(e => e.type))].sort();
-  $("#f-type").innerHTML = `<option value="">All types</option><option value="business">Companies (all kinds)</option>` +
-    types2.map(t => `<option value="${esc(t)}">${esc(cap(t))}</option>`).join("");
+  // Types ordered by how many distinct entities they have; "business" first when present.
+  const nByType = d3.rollup([...entityInfo.values()], v => v.length, e => e.type);
+  const choices = types2.sort((a, b) => nByType.get(b) - nByType.get(a));
+  if (choices.some(t => BUSINESS.has(t))) choices.unshift("business");
+  const opts = choices.map(t => `<option value="${esc(t)}">${esc(typeLabel(t))}</option>`).join("");
+  $("#f-type").innerHTML = `<option value="">All types</option>` + opts;
+  const f = $("#f-focus"), saved = (() => { try { return localStorage.getItem("focus"); } catch { return null; } })();
+  f.innerHTML = opts;
+  f.value = choices.includes(saved) ? saved : choices.find(t => !["country", "city", "person"].includes(t)) || choices[0];
 }
 
 function setupFilters() {
@@ -364,7 +371,7 @@ function render() {
   renderGrowth(arts);
   if (!mentions.length) return;
   view = aggregate(arts);
-  renderCompanies(); renderNetwork(); renderMap(); renderTable();
+  renderFocus(); renderNetwork(); renderMap(); renderTable();
 }
 
 // ---- Growth timeline: stacked cumulative area by week ----
@@ -409,25 +416,29 @@ function renderGrowth(arts) {
 }
 
 // ---- Companies ----
-function renderCompanies() {
-  const top = view.ents.filter(e => BUSINESS.has(e.type)).sort((a, b) => b.arts.size - a.arts.size).slice(0, 25);
-  const box = $("#company-bars");
-  if (!top.length) { box.innerHTML = `<p class="loading">No companies in the articles matching these filters.</p>`; return; }
+function renderFocus() {
+  const focus = $("#f-focus").value;
+  $("#focus-title").textContent = `Most mentioned: ${typeLabel(focus)}`;
+  const top = view.ents.filter(e => inType(e.type, focus)).sort((a, b) => b.arts.size - a.arts.size).slice(0, 25);
+  const box = $("#focus-bars");
+  if (!top.length) { box.innerHTML = `<p class="loading">Nothing of this type in the articles matching these filters.</p>`; return; }
   const max = top[0].arts.size;
   box.innerHTML = top.map(e => `<button type="button" class="bar" data-key="${esc(e.key)}">
-      <span class="name">${esc(e.name)} ${e.type !== "company" ? `<span class="tag">${esc(e.type)}</span>` : ""}</span>
+      <span class="name">${esc(e.name)} ${e.type !== focus && !(focus === "business" && e.type === "company") ? `<span class="tag">${esc(e.type)}</span>` : ""}</span>
       <span class="track"><span class="fill" style="display:block;width:${(e.arts.size / max * 100).toFixed(1)}%"></span></span>
       <span class="n">${fmt.format(e.arts.size)}</span></button>`).join("");
 }
 
 // ---- Network: top entities + articles linking two or more of them ----
-const NET_GROUPS = [["Companies", t => BUSINESS.has(t), "var(--s1)"], ["Government agencies", t => t === "government agency", "var(--s2)"],
-  ["People", t => t === "person", "var(--s3)"], ["Countries", t => t === "country", "var(--s4)"], ["Other", () => true, "var(--s5)"]];
+
 let sim;
 function renderNetwork() {
   const t = $("#n-type").value, N = +$("#n-count").value;
-  const ents = view.ents.filter(e => t === "business" ? BUSINESS.has(e.type) : t === "nocountry" ? e.type !== "country" : true)
+  const ents = view.ents.filter(e => t === "focus" ? inType(e.type, $("#f-focus").value) : t === "nocountry" ? e.type !== "country" : true)
     .sort((a, b) => b.arts.size - a.arts.size).slice(0, N);
+  // Four most common types on screen get colors; the rest share "Other".
+  const topTypes = [...d3.rollup(ents, v => v.length, e => e.type)].sort((a, b) => b[1] - a[1]).slice(0, 4).map(d => d[0]);
+  const NET_GROUPS = topTypes.map((ty, i) => [cap(ty), x => x === ty, `var(--s${i + 1})`]).concat([["Other", () => true, "var(--s5)"]]);
   const group = e => NET_GROUPS.find(([, f]) => f(e.type));
   const artLinks = new Map();
   for (const e of ents) for (const aid of e.arts) (artLinks.get(aid) || artLinks.set(aid, []).get(aid)).push(e.key);
@@ -472,6 +483,7 @@ function renderNetwork() {
   box.replaceChildren(svg.node());
 }
 $("#n-type").addEventListener("change", () => view && renderNetwork());
+$("#f-focus").addEventListener("change", () => { try { localStorage.setItem("focus", $("#f-focus").value); } catch {} if (view) { renderFocus(); renderNetwork(); } });
 $("#n-count").addEventListener("change", () => view && renderNetwork());
 
 // ---- Map ----
@@ -507,7 +519,7 @@ function renderMap() {
 // ---- Entity table ----
 function renderTable() {
   const q = normKey($("#q").value), t = $("#f-type").value;
-  let rows = view.ents.filter(e => (!t || (t === "business" ? BUSINESS.has(e.type) : e.type === t)) &&
+  let rows = view.ents.filter(e => (!t || inType(e.type, t)) &&
     (!q || normKey(e.name).includes(q) || e.key.includes(q)));
   const val = e => sortKey === "arts" ? e.arts.size : sortKey === "name" ? e.name.toLowerCase() : e[sortKey];
   rows.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sortDir || b.arts.size - a.arts.size);
@@ -526,7 +538,9 @@ function openEntity(key) {
   const co = new Map();
   for (const m of mentions) if (m.key !== key && e.arts.has(m.aid)) { const s = co.get(m.key) || co.set(m.key, new Set()).get(m.key); s.add(m.aid); }
   const coList = [...co].map(([k, s]) => ({ ...entityInfo.get(k), n: s.size })).sort((a, b) => b.n - a.n);
-  const groups = CO_GROUPS.map(([title, test]) => [title, coList.filter(c => test(c.type)).slice(0, 10)]).filter(([, l]) => l.length);
+  const byType = d3.group(coList, c => BUSINESS.has(c.type) ? "business" : c.type);
+  const groups = [...byType].sort((a, b) => d3.sum(b[1], c => c.n) - d3.sum(a[1], c => c.n)).slice(0, 8)
+    .map(([ty, l]) => [typeLabel(ty), l.slice(0, 10)]);
   const perArt = d3.group(ms, m => m.aid);
   const srcs = [...perArt].map(([aid, list]) => ({ a: byArticle.get(aid), list })).sort((x, y) => y.a.savedAt - x.a.savedAt);
   const d = t => dfmt.format(new Date(t));

@@ -1,6 +1,6 @@
 # Canary pipeline
 
-Pulls new rows from the Canary sheet, fetches each article, extracts entities locally with GLiNER,
+Pulls new rows from the Canary sheet, fetches each article, extracts the entity types you choose locally with GLiNER,
 optionally asks your own questions with an LLM (local LM Studio or Claude), and pushes everything
 to a results Google Sheet.
 
@@ -12,6 +12,18 @@ python3 app.py
 
 Open http://127.0.0.1:8765. Needs [uv](https://docs.astral.sh/uv/); dependencies install on first run.
 The first extraction also downloads the GLiNER model (~1.5 GB, once).
+
+## Set it up for your research
+
+Nothing is tied to one topic. In the panel's **What to extract** box, list the entity types your
+research cares about, one per line, in plain words: GLiNER takes them as written, no training.
+For example, a land-rights project might use `person, company, community, river, mining concession,
+court, law or policy, money amount, date`. Specific types work better than vague ones: with a
+catch-all "organization", companies get absorbed into it.
+
+After changing the types, tick **Re-extract every article** and press **Extract entities (GLiNER)**
+once. That reprocesses everything from cached text, about an hour for 2,000 articles; normal runs
+only process new rows. Then push, and the viewer picks up the new types on its own.
 
 ## Connect the results sheet (once)
 
@@ -31,7 +43,8 @@ The first extraction also downloads the GLiNER model (~1.5 GB, once).
 The team's view of the data. It reads the results sheet live every time it opens (it must stay
 published: File → Share → Publish to web), so it is always current after a push. It shows:
 - how the database grows, per person or project;
-- companies ranked by article count;
+- the most-mentioned entities of the **Focus** type you pick (companies, people, facilities, any type in the data);
+- a network of the top entities and the articles that connect them;
 - a world map of coverage;
 - a searchable table of every entity.
 

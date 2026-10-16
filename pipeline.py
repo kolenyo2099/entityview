@@ -8,6 +8,7 @@ Reads the published Canary sheet, skips rows already in out/articles.csv,
 fetches article text, runs GLiNER, appends to out/articles.csv + out/mentions.csv.
 
     uv run pipeline.py --limit 50
+    uv run pipeline.py --labels "person,government agency,court,law or policy" --all
 """
 import argparse, csv, re, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +19,9 @@ from urllib.request import urlopen
 
 CANARY_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTapAMv0H6WBEwm1_YdEv6x6NKnz30vEDpbYi4gHEUhSumry70hjQRq61gjWWZ2YVWrFAlnybaE9WEO/pub?output=csv"
 MODEL = "urchade/gliner_multi-v2.1"  # multilingual: eng/spa/fra/...
-# Specific labels matter: with a vague "organization" label, companies get absorbed by it
-# (e.g. Omni Air International came out as "government agency"). "news outlet" soaks up media names.
+# Default entity types; any research can pass its own with --labels (the control panel does).
+# Specific labels beat vague ones: with a catch-all "organization", companies got absorbed by it
+# (Omni Air International came out as "government agency"). "news outlet" soaks up media names.
 LABELS = ["company", "airline", "state-owned company", "news outlet", "person", "government agency",
           "non-profit organization", "international organization", "armed group", "political party",
           "country", "city", "detention facility", "court", "law or policy", "money amount", "date"]
@@ -48,9 +50,9 @@ def keep(e):
     return e["label"] == "date" or any(c.isupper() or c.isdigit() for c in e["text"])
 
 
-def label(e):
-    """A legal-form suffix (LLC, Inc., S.A.) makes it a company whatever GLiNER said."""
-    if re.search(rf"\s{SUFFIXES}\.?$", re.sub(r"[^\w\s&]", " ", e["text"].casefold()).strip()):
+def label(e, labels=LABELS):
+    """A legal-form suffix (LLC, Inc., S.A.) makes it a company whatever GLiNER said (when companies are wanted)."""
+    if "company" in labels and re.search(rf"\s{SUFFIXES}\.?$", re.sub(r"[^\w\s&]", " ", e["text"].casefold()).strip()):
         return "company"
     return e["label"]
 
@@ -118,7 +120,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="process at most N new rows (0 = all)")
     ap.add_argument("--source", default=CANARY_CSV, help="Canary CSV url or path")
+    ap.add_argument("--labels", help="comma-separated entity types for GLiNER (default: the LABELS list above)")
+    ap.add_argument("--all", action="store_true", help="re-extract every row, e.g. after changing --labels (article text stays cached)")
     a = ap.parse_args()
+    labels = [x.strip() for x in a.labels.split(",") if x.strip()] if a.labels else LABELS
+    if a.all:
+        for f in ("articles.csv", "mentions.csv"):
+            (OUT / f).unlink(missing_ok=True)
 
     raw = urlopen(a.source).read().decode("utf-8") if a.source.startswith("http") else Path(a.source).read_text("utf-8")
     done = read_ids(OUT / "articles.csv")
@@ -128,7 +136,7 @@ def main():
             seen.add(r["l"]); todo.append(r)
     if a.limit:
         todo = todo[:a.limit]
-    print(f"{len(done)} already processed, {len(todo)} to do")
+    print(f"{len(done)} already processed, {len(todo)} to do. Looking for: {', '.join(labels)}")
     if not todo:
         return
 
@@ -142,8 +150,8 @@ def main():
     for i, (r, (src, text)) in enumerate(zip(todo, texts), 1):
         mentions = []
         for ch in chunks(text[:MAX_CHARS]):
-            for e in filter(keep, model.predict_entities(ch, LABELS, threshold=THRESHOLD)):
-                mentions.append({"article_id": r["l"], "label": label(e), "text": e["text"],
+            for e in filter(keep, model.predict_entities(ch, labels, threshold=THRESHOLD)):
+                mentions.append({"article_id": r["l"], "label": label(e, labels), "text": e["text"],
                                  "norm": norm(e["text"]), "score": round(e["score"], 3),
                                  "context": ch[max(0, e["start"] - 120):e["end"] + 120]})
         # write per article so a crash mid-run loses nothing already done

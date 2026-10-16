@@ -50,6 +50,14 @@
   </section>
 
   <section>
+    <h2>What to extract</h2>
+    <label for="labels">Entity types for GLiNER <span class="hint">one per line, in plain words; specific types beat vague ones ("airline" rather than "organization")</span></label>
+    <textarea id="labels"></textarea>
+    <div class="seg"><label><input type="checkbox" id="reextract"> Re-extract every article on the next Extract (needed after changing types; article text is reused, takes about an hour)</label></div>
+    <button id="reset-labels" type="button">Restore default types</button>
+  </section>
+
+  <section>
     <h2>Questions for the LLM</h2>
     <div class="row">
       <div>
@@ -86,7 +94,7 @@
     </div>
     <div class="buttons">
       <button class="primary" data-steps="extract,ask,push">Run all</button>
-      <button data-steps="extract">Extract entities</button>
+      <button data-steps="extract">Extract entities (GLiNER)</button>
       <button data-steps="ask">Ask questions</button>
       <button data-steps="push">Push to sheet</button>
       <button id="stop">Stop</button>
@@ -98,7 +106,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const post = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-let apiKeySet = false;
+let apiKeySet = false, defaultLabels = '';
 
 function backend() { return document.querySelector('input[name=backend]:checked')?.value || 'lmstudio'; }
 function showBackend() {
@@ -111,12 +119,13 @@ function form() {
   return {source: $('source').value.trim(), sheet_url: $('sheet_url').value.trim(), token: $('token').value,
           backend: b, model: b === 'lmstudio' ? $('model_local').value : $('model_remote').value.trim(),
           questions_name: $('questions_name').value.trim() || 'default', limit: +$('limit').value || 0,
-          questions: $('questions').value, api_key: $('api_key').value};
+          questions: $('questions').value, api_key: $('api_key').value, labels: $('labels').value, reextract: $('reextract').checked};
 }
 
 async function init() {
   const s = await (await fetch('/state')).json(), c = s.config;
-  for (const k of ['source', 'sheet_url', 'token', 'questions_name', 'limit']) $(k).value = c[k];
+  for (const k of ['source', 'sheet_url', 'token', 'questions_name', 'limit', 'labels']) $(k).value = c[k];
+  defaultLabels = s.default_labels;
   $('questions').value = s.questions;
   $('sets').innerHTML = s.question_sets.map(n => `<option value="${n}">`).join('');
   document.querySelector(`input[name=backend][value=${c.backend}]`).checked = true;
@@ -164,8 +173,10 @@ document.querySelectorAll('button[data-steps]').forEach(b => b.onclick = async (
   const r = await post('/run', {...f, steps});
   if (!r.ok) alert((await r.json()).error);
   if (f.api_key) { apiKeySet = true; $('api_key').value = ''; showBackend(); }
+  if (steps.includes('extract')) $('reextract').checked = false;
 });
 $('stop').onclick = () => post('/stop', {});
+$('reset-labels').onclick = () => { $('labels').value = defaultLabels; };
 init().then(poll);
 </script>
 </body>
